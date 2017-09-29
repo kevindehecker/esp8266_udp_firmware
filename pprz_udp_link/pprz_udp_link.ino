@@ -10,32 +10,8 @@ enum wifi_modes {
   WifiModeAccessPoint
 } wifi_mode = WIFI_MODE;
 
-#define PPRZ_STX 0x99
 #define LED_PIN 13
 
-/* PPRZ message parser states */
-enum normal_parser_states {
-  SearchingPPRZ_STX,
-  ParsingLength,
-  ParsingSenderId,
-  ParsingMsgId,
-  ParsingMsgPayload,
-  CheckingCRCA,
-  CheckingCRCB
-};
-
-struct normal_parser_t {
-  enum normal_parser_states state;
-  unsigned char length;
-  int counter;
-  unsigned char sender_id;
-  unsigned char msg_id;
-  unsigned char payload[256];
-  unsigned char crc_a;
-  unsigned char crc_b;
-};
-
-struct normal_parser_t parser;
 #define BUFSIZE 256
 char packetBuffer[BUFSIZE]; //buffer to hold incoming packet
 char outBuffer[BUFSIZE];    //buffer to hold outgoing data
@@ -76,7 +52,7 @@ void setup() {
 
     Serial.print("$");
     
-    WiFi.softAP(ssid, password);
+    WiFi.softAP(ssid, password,7);
     myIP = WiFi.softAPIP();
     /* Reconfigure broadcast IP */
     IPAddress AP_broadcastIP(192,168,4,255);
@@ -138,22 +114,7 @@ void loop() {
     Serial.write(packetBuffer, len);
   }
 
-/*
-  //is it really necessary to put stuff in a buffer????
-  int cnt = 0;  
-  while(Serial.available() > 0) {
-    unsigned char inbyte = Serial.read();
-    outBuffer[cnt] = inbyte ;
-    cnt ++;
-    if (cnt >= BUFSIZE) {    
-      sendBuffer(cnt);
-    }
-  }
-  if (cnt > 0) {
-    sendBuffer(cnt);
-  }  
-
-*/
+  //send any data from pprz to gcs
   if (Serial.available() > 0) {
     udp.beginPacketMulticast(broadcastIP, txPort, myIP);    
     while(Serial.available() > 0) {    
@@ -163,14 +124,6 @@ void loop() {
      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
 
-}
-
-
-void sendBuffer(int cnt) {
-  udp.beginPacketMulticast(broadcastIP, txPort, myIP);
-  udp.write(outBuffer, cnt);
-  udp.endPacket();
-  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
 }
 
 

@@ -8,8 +8,8 @@ const char *ssid = "Pats";
 //const char *password = "1234567890"; // In AccessPoint Mode, must be AT LEAST 8 characters long.
 const char *password = "BamBifBoem"; // In AccessPoint Mode, must be AT LEAST 8 characters long.
 
-#define SERIAL_BAUD_RATE 115200
-//#define SERIAL_BAUD_RATE 921600
+//#define SERIAL_BAUD_RATE 115200
+#define SERIAL_BAUD_RATE 921600
 
 /* The broadcast IP, can be obtained with the ifconfig command in Linux */
 IPAddress broadcastIP(192,168,1,255); // Only required in WifiModeClient

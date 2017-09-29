@@ -36,10 +36,9 @@ struct normal_parser_t {
 };
 
 struct normal_parser_t parser;
-
-char packetBuffer[256]; //buffer to hold incoming packet
-char outBuffer[256];    //buffer to hold outgoing data
-uint8_t out_idx = 0;
+#define BUFSIZE 256
+char packetBuffer[BUFSIZE]; //buffer to hold incoming packet
+char outBuffer[BUFSIZE];    //buffer to hold outgoing data
 uint8_t serial_connect_info = 1; // Serial print wifi connection info
 
 WiFiUDP udp;
@@ -139,128 +138,39 @@ void loop() {
     Serial.write(packetBuffer, len);
   }
 
-  /* Check for Serial data from drone */
-  /* Put all serial in_bytes in a buffer */
+/*
+  //is it really necessary to put stuff in a buffer????
+  int cnt = 0;  
   while(Serial.available() > 0) {
-    //digitalWrite(LED_PIN, LOW);
     unsigned char inbyte = Serial.read();
-    if (parse_single_byte(inbyte)) { // if complete message detected
-      udp.beginPacketMulticast(broadcastIP, txPort, myIP);
-      udp.write(outBuffer, out_idx);
-      udp.endPacket();
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    outBuffer[cnt] = inbyte ;
+    cnt ++;
+    if (cnt >= BUFSIZE) {    
+      sendBuffer(cnt);
     }
   }
-  
-  //delay(10);
-  //digitalWrite(LED_PIN, HIGH);
+  if (cnt > 0) {
+    sendBuffer(cnt);
+  }  
 
-
-}
-
-/*
- * PPRZ-message: ABCxxxxxxxDE
-    A PPRZ_STX (0x99)
-    B LENGTH (A->E)
-    C PPRZ_DATA
-      0 SENDER_ID
-      1 MSG_ID
-      2 MSG_PAYLOAD
-      . DATA (messages.xml)
-    D PPRZ_CHECKSUM_A (sum[B->C])
-    E PPRZ_CHECKSUM_B (sum[ck_a])
-
-    Returns 0 if not ready, return 1 if complete message was detected
 */
-uint8_t parse_single_byte(unsigned char in_byte)
-{
-  switch (parser.state) {
-
-    case SearchingPPRZ_STX:
-      out_idx = 0;
-      if (in_byte == PPRZ_STX) {
-        //printf("Got PPRZ_STX\n");
-        parser.crc_a = 0;
-        parser.crc_b = 0;
-        parser.counter = 1;
-        parser.state = ParsingLength;
-      }
-      break;
-
-    case ParsingLength:
-      parser.length = in_byte;
-      parser.crc_a += in_byte;
-      parser.crc_b += parser.crc_a;
-      parser.counter++;
-      parser.state = ParsingSenderId;
-      break;
-
-    case ParsingSenderId:
-      parser.sender_id = in_byte;
-      parser.crc_a += in_byte;
-      parser.crc_b += parser.crc_a;
-      parser.counter++;
-      parser.state = ParsingMsgId;
-      break;
-
-    case ParsingMsgId:
-      parser.msg_id = in_byte;
-      parser.crc_a += in_byte;
-      parser.crc_b += parser.crc_a;
-      parser.counter++;
-      if (parser.length == 6) {
-        parser.state = CheckingCRCA;
-      } else {
-        parser.state = ParsingMsgPayload;
-      }
-      break;
-
-    case ParsingMsgPayload:
-      parser.payload[parser.counter-4] = in_byte;
-      parser.crc_a += in_byte;
-      parser.crc_b += parser.crc_a;
-      parser.counter++;
-      if (parser.counter == parser.length - 2) {
-        parser.state = CheckingCRCA;
-      }
-      break;
-
-    case CheckingCRCA:
-      //printf("CRCA: %d vs %d\n", in_byte, parser.crc_a);
-      if (in_byte == parser.crc_a) {
-        parser.state = CheckingCRCB;
-      }
-      else {
-        parser.state = SearchingPPRZ_STX;
-      }
-      break;
-
-    case CheckingCRCB:
-      //printf("CRCB: %d vs %d\n", in_byte, parser.crc_b);
-      if (in_byte == parser.crc_b) {
-        /*printf("MSG ID: %d \t"
-               "SENDER_ID: %d\t"
-               "LEN: %d\t"
-               "SETTING: %d\n",
-               parser.msg_id,
-               parser.sender_id,
-               parser.length,
-               parser.payload[0]);*/
-        //printf("Request confirmed\n");
-
-        /* Check what to do next if the command was received */
-        outBuffer[out_idx++] = in_byte; // final byte
-        parser.state = SearchingPPRZ_STX;
-        return 1;
-      }
-      parser.state = SearchingPPRZ_STX;
-      break;
-
-    default:
-      /* Should never get here */
-      break;
+  if (Serial.available() > 0) {
+    udp.beginPacketMulticast(broadcastIP, txPort, myIP);    
+    while(Serial.available() > 0) {    
+      udp.write(Serial.read());
+    }
+     udp.endPacket();
+     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
-  
-  outBuffer[out_idx++] = in_byte;
-  return 0;
+
 }
+
+
+void sendBuffer(int cnt) {
+  udp.beginPacketMulticast(broadcastIP, txPort, myIP);
+  udp.write(outBuffer, cnt);
+  udp.endPacket();
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+}
+
+

@@ -12,12 +12,25 @@ enum wifi_modes {
 
 #define LED_PIN 13
 
-#define BUFSIZE 256
-char packetBuffer[BUFSIZE]; //buffer to hold incoming packet
-char outBuffer[BUFSIZE];    //buffer to hold outgoing data
-uint8_t serial_connect_info = 1; // Serial print wifi connection info
+uint8_t logheader[] = "LOG package start!"; // 
+uint8_t logfooter[] = "End log";
+/* PPRZ message parser states */
+enum log_states {
+  HEADER,
+  LENGTH,  
+  DATA
+};
+log_states log_state;
+
+#define LOGBUFSIZE 4096
+uint8_t logBuf[LOGBUFSIZE]; //buffer to hold outgoing log packet incoming from serial
+uint8_t outbuf[256]; //buffer to hold outgoing other packet incoming from serial
+uint8_t serial_connect_info = 0; // Serial print wifi connection info
 
 WiFiUDP udp;
+
+WiFiClient client;
+WiFiServer server(666);
 
 IPAddress myIP;
 
@@ -98,6 +111,10 @@ void setup() {
 
   /* Connected, LED ON */
   digitalWrite(LED_PIN, HIGH);
+
+  server.begin();
+  server.setNoDelay(true);
+  
 }
 
 void loop() {
@@ -107,23 +124,93 @@ void loop() {
 
   /* Check for UDP data from host */
   int packetSize = udp.parsePacket();
-  int len = 0;
   if(packetSize) { /* data received on udp line*/
     // read the packet into packetBufffer
-    len = udp.read(packetBuffer, 255);
-    Serial.write(packetBuffer, len);
+    uint8_t buf[packetSize];
+    size_t len = udp.read(buf, packetSize);
+    Serial.write(buf, len);
   }
 
-  //send any data from pprz to gcs
-  if (Serial.available() > 0) {
-    udp.beginPacketMulticast(broadcastIP, txPort, myIP);    
-    while(Serial.available() > 0) {    
-      udp.write(Serial.read());
-    }
-     udp.endPacket();
-     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  //direct data transfer for log
+  if (server.hasClient() && !client.connected()){
+    if (client)
+      client.stop();
+    client=server.available();
+  } else {
+    server.available().stop();
   }
 
+  size_t len = Serial.available();
+  uint8_t sbuf[len];   
+  if (len > 0) {               
+    Serial.readBytes(sbuf, len);
+    //check for log stuff
+    for (int i = 0 ; i < len; i++) {
+      check_log_package(sbuf[i]);
+    }    
+  
+    if (log_state==LENGTH || log_state==DATA) {
+      //TODO: ignore log data for udp sender
+    } else {  //normal datalink telemetry      
+      udp.beginPacketMulticast(broadcastIP, txPort, myIP);    
+      udp.write(sbuf, len);
+      udp.endPacket();
+      delay(1);
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    }     
+  }
 }
 
+int cnt;
+int pcnt;
+int plength;
+void check_log_package(uint8_t b) {
+  switch (log_state) {
+
+  case HEADER:
+  if (b == logheader[cnt]){
+    cnt ++;
+    if (cnt == 18) {
+      log_state=LENGTH;
+      plength=0;
+      cnt =0;
+    }
+  } else
+    cnt == 0;
+  case LENGTH:
+    plength += b << (cnt*8);
+    cnt ++;
+    if (cnt> 3) {
+      cnt = 0;
+      log_state=DATA;
+      pcnt=0;
+    }
+  case DATA:    
+    logBuf[pcnt] = b;
+    cnt++;
+    pcnt++;
+    if (pcnt >= LOGBUFSIZE) {      
+      send_log_buf(LOGBUFSIZE);
+      pcnt=0;
+    }    
+    if (cnt >= plength){
+      send_log_buf(pcnt);
+      pcnt=0;
+      cnt=0;
+      log_state=HEADER;
+    }
+  default:
+      // Should never get here
+      break;
+  }
+}
+
+void send_log_buf(int len) {
+  if (client && client.connected()) {
+        //send log data over tcp           
+        client.write((const uint8_t*)logBuf, len);
+        delay(1);
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));    
+      }
+}
 

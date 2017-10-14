@@ -15,9 +15,16 @@ enum wifi_modes {
 #define BUFSIZE 256
 char packetBuffer[BUFSIZE]; //buffer to hold incoming packet
 char outBuffer[BUFSIZE];    //buffer to hold outgoing data
-uint8_t serial_connect_info = 1; // Serial print wifi connection info
+uint8_t serial_connect_info = 0; // Serial print wifi connection info
+
+char logheader[10];
+
+#define LOGBUFSIZE 2048
+uint8_t logBuf[LOGBUFSIZE] = {0}; //buffer to hold outgoing log packet incoming from serial 
 
 WiFiUDP udp;
+WiFiClient client; 
+WiFiServer server(666);
 
 IPAddress myIP;
 
@@ -98,32 +105,86 @@ void setup() {
 
   /* Connected, LED ON */
   digitalWrite(LED_PIN, HIGH);
+
+  server.begin(); 
+  server.setNoDelay(true);
+
+  String cs = "log_st";
+  cs.toCharArray(logheader,15);
+  //for (int i = 0; i<LOGBUFSIZE;i++)
+//    logBuf[i] = 66;
+  
 }
 
+static int state = 0;
+static int lcnt = 0;
+  
 void loop() {
   
   /* Check for OTA */
   ArduinoOTA.handle();
 
+
+  if (server.hasClient() && !client.connected()){ 
+    if (client) 
+      client.stop(); 
+    client=server.available(); 
+  } else { 
+    server.available().stop(); 
+  }
+
   /* Check for UDP data from host */
   int packetSize = udp.parsePacket();
-  int len = 0;
+  size_t len = 0;
   if(packetSize) { /* data received on udp line*/
     // read the packet into packetBufffer
     len = udp.read(packetBuffer, 255);
     Serial.write(packetBuffer, len);
   }
 
-  //send any data from pprz to gcs
-  if (Serial.available() > 0) {
-    udp.beginPacketMulticast(broadcastIP, txPort, myIP);    
-    while(Serial.available() > 0) {    
-      udp.write(Serial.read());
-    }
-     udp.endPacket();
-     digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-  }
+  len = Serial.available(); 
+  if (len > 0) {
+    uint8_t sbuf[len];
+    Serial.readBytes(sbuf, len); 
+    size_t flen = len;     
 
+    //the log begins with LOGHEADER, then LOGBUFSIZE bytes
+    for (int i = 0 ; i < len; i++) {
+      if (state != 6) {
+        if (sbuf[i] == logheader[state]) 
+          state++;
+        else
+          state = 0;
+
+      } else if (state == 6 && lcnt < LOGBUFSIZE) {
+        flen = 0;
+        logBuf[lcnt] = sbuf[i];
+        lcnt++;
+      } 
+      if (state == 6 && lcnt == LOGBUFSIZE) {        
+        send_log_buf(LOGBUFSIZE);
+        flen = 0;
+        lcnt = 0;
+        state = 0;
+      }
+    }
+    
+    if (flen > 0) {
+      udp.beginPacketMulticast(broadcastIP, txPort, myIP);     
+      udp.write(sbuf, flen); 
+      udp.endPacket(); 
+      delay(10); 
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN)); 
+    }
+  } 
 }
 
+int counter = 0;
+void send_log_buf(int len) { 
+  if (client && client.connected()) { 
+        client.write((const uint8_t*)logBuf, LOGBUFSIZE); 
+        delay(1); 
+        digitalWrite(LED_PIN, !digitalRead(LED_PIN));     
+      } 
+} 
 
